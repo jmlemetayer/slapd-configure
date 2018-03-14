@@ -1,0 +1,13 @@
+## Create organizational base tree
+
+# Add groups organizational unit
+dn: ou=groups,{{ LDAP_BASE_DN }}
+changetype: add
+objectclass: organizationalUnit
+ou: groups
+
+# Add users organizational unit
+dn: ou=users,{{ LDAP_BASE_DN }}
+changetype: add
+objectclass: organizationalUnit
+ou: users

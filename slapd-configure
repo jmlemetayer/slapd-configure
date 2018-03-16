@@ -117,4 +117,20 @@ do
 		${ldif} | ldapmodify -Y EXTERNAL -Q -H ldapi:///
 done
 
+add_config()
+{
+	if grep -qc "^${2}" "${1}"
+	then
+		sed --in-place --follow-symlinks "s|^${2}.*|${2}${3}|g" "${1}"
+	else
+		echo "${2}${3}" >> "${1}"
+	fi
+}
+
+add_config /etc/default/slapd SLAPD_SERVICES "=\"ldap:/// ldaps:/// ldapi:///\""
+add_config /etc/ldap/ldap.conf TLS_KEY " ${LDAP_TLS_KEY_PATH}"
+add_config /etc/ldap/ldap.conf TLS_CERT " ${LDAP_TLS_CRT_PATH}"
+add_config /etc/ldap/ldap.conf TLS_CACERT " ${LDAP_TLS_CA_CRT_PATH}"
+add_config /etc/ldap/ldap.conf TLS_REQCERT " try"
+
 service slapd restart

@@ -85,6 +85,9 @@ LDAP_BASE_DN=$(awk 'BEGIN{FS="."} {
 		printf("dc=%s%s", $(i), (i < NF) ? "," :"");
 	}}' <<< ${LDAP_DOMAIN})
 
+exec 3>&1
+exec 1>/dev/null
+
 cat << EOF | debconf-set-selections
 slapd slapd/password2 password ${LDAP_ADMIN_PASSWORD}
 slapd slapd/password1 password ${LDAP_ADMIN_PASSWORD}
@@ -104,7 +107,7 @@ service slapd restart
 
 for ldif in ${0%/*}/ldif/external/*
 do
-	echo "Processing file: ${ldif}"
+	echo >&3 "Processing file: ${ldif##*ldif/}"
 	sed 	--expression "s|{{ LDAP_BASE_DN }}|${LDAP_BASE_DN}|g" \
 		--expression "s|{{ LDAP_CONFIG_PASSWORD_ENCRYPTED }}|${LDAP_CONFIG_PASSWORD_ENCRYPTED}|g" \
 		${ldif} | ldapmodify -Y EXTERNAL -Q -H ldapi:///
@@ -112,7 +115,7 @@ done
 
 for ldif in ${0%/*}/ldif/localhost/*
 do
-	echo "Processing file: ${ldif}"
+	echo >&3 "Processing file: ${ldif##*ldif/}"
 	sed 	--expression "s|{{ LDAP_BASE_DN }}|${LDAP_BASE_DN}|g" \
 		--expression "s|{{ LDAP_READONLY_PASSWORD_ENCRYPTED }}|${LDAP_READONLY_PASSWORD_ENCRYPTED}|g" \
 		${ldif} | ldapmodify -h localhost -p 389 \
@@ -121,7 +124,7 @@ done
 
 for ldif in ${0%/*}/ldif/tls/*
 do
-	echo "Processing file: ${ldif}"
+	echo >&3 "Processing file: ${ldif##*ldif/}"
 	sed 	--expression "s|{{ LDAP_TLS_KEY_PATH }}|${LDAP_TLS_KEY_PATH}|g" \
 		--expression "s|{{ LDAP_TLS_CRT_PATH }}|${LDAP_TLS_CRT_PATH}|g" \
 		--expression "s|{{ LDAP_TLS_CA_CRT_PATH }}|${LDAP_TLS_CA_CRT_PATH}|g" \

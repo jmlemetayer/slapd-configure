@@ -15,4 +15,4 @@ olcRefintAttribute: manager
 olcRefintAttribute: uniqueMember
 olcRefintAttribute: member
 olcRefintAttribute: memberOf
-olcRefintNothing: cn=admin,{{ LDAP_BASE_DN }}
+olcRefintNothing: cn=admin,{{ BASE_DN }}

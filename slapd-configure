@@ -1,7 +1,6 @@
 #!/bin/bash -e
 
 is_installed() { dpkg --status ${@} >/dev/null 2>&1; }
-is_readable() { su openldap --shell /bin/sh -- -c "test -r ${1}"; }
 
 if ! is_installed debconf ldap-utils slapd
 then
@@ -10,89 +9,82 @@ then
 	exit 1
 fi
 
-read -p "Remove old database? [Y/n] " LDAP_REMOVE_DB
+read -p "Remove old database? [Y/n] " REMOVE_DB
 
-case ${LDAP_REMOVE_DB:-y} in
+case ${REMOVE_DB:-y} in
 	y|Y) rm --recursive --force /var/lib/ldap /etc/ldap/slapd.d ;;
 esac
 
-read -sp "Enter Admin Password: " LDAP_ADMIN_PASSWORD && echo
-read -sp "Retype Admin Password: " LDAP_ADMIN_PASSWORD_2 && echo
+read_password()
+{
+	local PASSWORD PASSWORD_2
 
-if [ "${LDAP_ADMIN_PASSWORD}" != "${LDAP_ADMIN_PASSWORD_2}" ]
-then
-	echo >&2 "Sorry, passwords do not match"
-	exit 1
-fi
+	read -sp "Enter ${1} Password: " PASSWORD && echo >&2
 
-read -sp "Enter Config Password: " LDAP_CONFIG_PASSWORD && echo
-read -sp "Retype Config Password: " LDAP_CONFIG_PASSWORD_2 && echo
+	if [ -z "${PASSWORD}" ]
+	then
+		echo >&2 "Sorry, empty passwords are not allowed"
+		return 1
+	fi
 
-if [ "${LDAP_CONFIG_PASSWORD}" != "${LDAP_CONFIG_PASSWORD_2}" ]
-then
-	echo >&2 "Sorry, passwords do not match"
-	exit 1
-else
-	LDAP_CONFIG_PASSWORD_ENCRYPTED=$(slappasswd -s "$LDAP_CONFIG_PASSWORD")
-fi
+	read -sp "Retype ${1} Password: " PASSWORD_2 && echo >&2
 
-read -sp "Enter Read Only Password: " LDAP_READONLY_PASSWORD && echo
-read -sp "Retype Read Only Password: " LDAP_READONLY_PASSWORD_2 && echo
+	if [ "${PASSWORD}" != "${PASSWORD_2}" ]
+	then
+		echo >&2 "Sorry, passwords do not match"
+		return 1
+	else
+		echo ${PASSWORD}
+	fi
+}
 
-if [ "${LDAP_READONLY_PASSWORD}" != "${LDAP_READONLY_PASSWORD_2}" ]
-then
-	echo >&2 "Sorry, passwords do not match"
-	exit 1
-else
-	LDAP_READONLY_PASSWORD_ENCRYPTED=$(slappasswd -s "$LDAP_READONLY_PASSWORD")
-fi
+ADMIN_PASSWORD="$(read_password "Admin")"
+CONFIG_PASSWORD="$(read_password "Config")"
+READONLY_PASSWORD="$(read_password "Read Only")"
 
-read -p "TLS private key file (privkey.pem): " LDAP_TLS_KEY_PATH
+CONFIG_PASSWORD_ENCRYPTED=$(slappasswd -s "${CONFIG_PASSWORD}")
+READONLY_PASSWORD_ENCRYPTED=$(slappasswd -s "${READONLY_PASSWORD}")
 
-if ! is_readable ${LDAP_TLS_KEY_PATH}
-then
-	echo >&2 "Cannot access '${LDAP_TLS_KEY_PATH}'"
-	exit 1
-fi
+is_readable() { su openldap --shell /bin/sh -- -c "test -r ${1}"; }
 
-read -p "TLS server certificate file (cert.pem): " LDAP_TLS_CRT_PATH
+read_file()
+{
+	local FILE
 
-if ! is_readable ${LDAP_TLS_CRT_PATH}
-then
-	echo >&2 "Cannot access '${LDAP_TLS_CRT_PATH}'"
-	exit 1
-fi
+	read -p "${1}: " FILE
 
-read -p "TLS CA certificate file (fullchain.pem): " LDAP_TLS_CA_CRT_PATH
+	if [ -z "${FILE}" ]
+	then
+		echo >&2 "Sorry, empty files are not allowed"
+		return 1
 
-if ! is_readable ${LDAP_TLS_CA_CRT_PATH}
-then
-	echo >&2 "Cannot access '${LDAP_TLS_CA_CRT_PATH}'"
-	exit 1
-fi
+	elif ! is_readable ${FILE}
+	then
+		echo >&2 "Cannot access '${FILE}'"
+		return 1
+	else
+		echo ${FILE}
+	fi
+}
 
-read -p "TLS DH parameter file (dhparam.pem): " LDAP_TLS_DH_PARAM_PATH
+TLS_KEY_PATH="$(read_file "TLS private key file (privkey.pem)")"
+TLS_CRT_PATH="$(read_file "TLS server certificate file (cert.pem)")"
+TLS_CA_CRT_PATH="$(read_file "TLS CA certificate file (fullchain.pem)")"
+TLS_DH_PARAM_PATH="$(read_file "TLS DH parameter file (dhparam.pem)")"
 
-if ! is_readable ${LDAP_TLS_DH_PARAM_PATH}
-then
-	echo >&2 "Cannot access '${LDAP_TLS_DH_PARAM_PATH}'"
-	exit 1
-fi
-
-LDAP_DOMAIN=$(hostname --domain)
-LDAP_BASE_DN=$(awk 'BEGIN{FS="."} {
+DOMAIN=$(hostname --domain)
+BASE_DN=$(awk 'BEGIN{FS="."} {
 	for (i = 1; i <= NF; i++) {
 		printf("dc=%s%s", $(i), (i < NF) ? "," :"");
-	}}' <<< ${LDAP_DOMAIN})
+	}}' <<< ${DOMAIN})
 
-exec 3>&1
-exec 1>/dev/null
+exec 3>&1 >/dev/null
 
 cat << EOF | debconf-set-selections
-slapd slapd/password2 password ${LDAP_ADMIN_PASSWORD}
-slapd slapd/password1 password ${LDAP_ADMIN_PASSWORD}
-slapd slapd/domain string ${LDAP_DOMAIN}
-slapd shared/organization string ${LDAP_DOMAIN}
+slapd slapd/password2 password ${ADMIN_PASSWORD}
+slapd slapd/password1 password ${ADMIN_PASSWORD}
+slapd slapd/domain string ${DOMAIN}
+slapd shared/organization string ${DOMAIN}
 slapd slapd/backend string MDB
 slapd slapd/purge_database boolean true
 slapd slapd/move_old_database boolean true
@@ -105,31 +97,35 @@ dpkg-reconfigure --frontend noninteractive slapd
 
 service slapd restart
 
+generate_ldif()
+{
+	sed 	--expression "s|{{ BASE_DN }}|${BASE_DN}|g" \
+		--expression "s|{{ CONFIG_PASSWORD_ENCRYPTED }}|${CONFIG_PASSWORD_ENCRYPTED}|g" \
+		--expression "s|{{ READONLY_PASSWORD_ENCRYPTED }}|${READONLY_PASSWORD_ENCRYPTED}|g" \
+		--expression "s|{{ TLS_CA_CRT_PATH }}|${TLS_CA_CRT_PATH}|g" \
+		--expression "s|{{ TLS_CRT_PATH }}|${TLS_CRT_PATH}|g" \
+		--expression "s|{{ TLS_DH_PARAM_PATH }}|${TLS_DH_PARAM_PATH}|g" \
+		--expression "s|{{ TLS_KEY_PATH }}|${TLS_KEY_PATH}|g" \
+		${1}
+}
+
 for ldif in ${0%/*}/ldif/external/*
 do
 	echo >&3 "Processing file: ${ldif##*ldif/}"
-	sed 	--expression "s|{{ LDAP_BASE_DN }}|${LDAP_BASE_DN}|g" \
-		--expression "s|{{ LDAP_CONFIG_PASSWORD_ENCRYPTED }}|${LDAP_CONFIG_PASSWORD_ENCRYPTED}|g" \
-		${ldif} | ldapmodify -Y EXTERNAL -Q -H ldapi:///
+	generate_ldif ${ldif} | ldapmodify -Y EXTERNAL -Q -H ldapi:///
 done
 
 for ldif in ${0%/*}/ldif/localhost/*
 do
 	echo >&3 "Processing file: ${ldif##*ldif/}"
-	sed 	--expression "s|{{ LDAP_BASE_DN }}|${LDAP_BASE_DN}|g" \
-		--expression "s|{{ LDAP_READONLY_PASSWORD_ENCRYPTED }}|${LDAP_READONLY_PASSWORD_ENCRYPTED}|g" \
-		${ldif} | ldapmodify -h localhost -p 389 \
-		-D "cn=admin,${LDAP_BASE_DN}" -w "${LDAP_ADMIN_PASSWORD}"
+	generate_ldif ${ldif} | ldapmodify -h localhost -p 389 \
+		-D "cn=admin,${BASE_DN}" -w "${ADMIN_PASSWORD}"
 done
 
 for ldif in ${0%/*}/ldif/tls/*
 do
 	echo >&3 "Processing file: ${ldif##*ldif/}"
-	sed 	--expression "s|{{ LDAP_TLS_KEY_PATH }}|${LDAP_TLS_KEY_PATH}|g" \
-		--expression "s|{{ LDAP_TLS_CRT_PATH }}|${LDAP_TLS_CRT_PATH}|g" \
-		--expression "s|{{ LDAP_TLS_CA_CRT_PATH }}|${LDAP_TLS_CA_CRT_PATH}|g" \
-		--expression "s|{{ LDAP_TLS_DH_PARAM_PATH }}|${LDAP_TLS_DH_PARAM_PATH}|g" \
-		${ldif} | ldapmodify -Y EXTERNAL -Q -H ldapi:///
+	generate_ldif ${ldif} | ldapmodify -Y EXTERNAL -Q -H ldapi:///
 done
 
 add_config()
@@ -143,9 +139,9 @@ add_config()
 }
 
 add_config /etc/default/slapd SLAPD_SERVICES "=\"ldap:/// ldaps:/// ldapi:///\""
-add_config /etc/ldap/ldap.conf TLS_KEY " ${LDAP_TLS_KEY_PATH}"
-add_config /etc/ldap/ldap.conf TLS_CERT " ${LDAP_TLS_CRT_PATH}"
-add_config /etc/ldap/ldap.conf TLS_CACERT " ${LDAP_TLS_CA_CRT_PATH}"
+add_config /etc/ldap/ldap.conf TLS_KEY " ${TLS_KEY_PATH}"
+add_config /etc/ldap/ldap.conf TLS_CERT " ${TLS_CRT_PATH}"
+add_config /etc/ldap/ldap.conf TLS_CACERT " ${TLS_CA_CRT_PATH}"
 add_config /etc/ldap/ldap.conf TLS_REQCERT " try"
 
 service slapd restart

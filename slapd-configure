@@ -36,6 +36,17 @@ else
 	LDAP_CONFIG_PASSWORD_ENCRYPTED=$(slappasswd -s "$LDAP_CONFIG_PASSWORD")
 fi
 
+read -sp "Enter Read Only Password: " LDAP_READONLY_PASSWORD && echo
+read -sp "Retype Read Only Password: " LDAP_READONLY_PASSWORD_2 && echo
+
+if [ "${LDAP_READONLY_PASSWORD}" != "${LDAP_READONLY_PASSWORD_2}" ]
+then
+	echo >&2 "Sorry, passwords do not match"
+	exit 1
+else
+	LDAP_READONLY_PASSWORD_ENCRYPTED=$(slappasswd -s "$LDAP_READONLY_PASSWORD")
+fi
+
 read -p "TLS private key file (privkey.pem): " LDAP_TLS_KEY_PATH
 
 if ! is_readable ${LDAP_TLS_KEY_PATH}
@@ -103,6 +114,7 @@ for ldif in ${0%/*}/ldif/localhost/*
 do
 	echo "Processing file: ${ldif}"
 	sed 	--expression "s|{{ LDAP_BASE_DN }}|${LDAP_BASE_DN}|g" \
+		--expression "s|{{ LDAP_READONLY_PASSWORD_ENCRYPTED }}|${LDAP_READONLY_PASSWORD_ENCRYPTED}|g" \
 		${ldif} | ldapmodify -h localhost -p 389 \
 		-D "cn=admin,${LDAP_BASE_DN}" -w "${LDAP_ADMIN_PASSWORD}"
 done

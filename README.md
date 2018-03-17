@@ -33,6 +33,8 @@ Enter Admin Password: ********
 Retype Admin Password: ********
 Enter Config Password: ********
 Retype Config Password: ********
+Enter Read Only Password: ********
+Retype Read Only Password: ********
 TLS private key file (privkey.pem): /etc/letsencrypt/live/ldap.jml.bzh/privkey.pem
 TLS server certificate file (cert.pem): /etc/letsencrypt/live/ldap.jml.bzh/cert.pem
 TLS CA certificate file (fullchain.pem): /etc/letsencrypt/live/ldap.jml.bzh/fullchain.pem
